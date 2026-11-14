@@ -8,24 +8,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify required public files
+      - name: Verify complete release and JavaScript
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           test -s index.html
           test -s manifest.webmanifest
           test -s sw.js
           test -f .nojekyll
           test -s icons/icon-192.png
           test -s icons/icon-512.png
-          python3 -m json.tool manifest.webmanifest >/dev/null
+          node --check sw.js
           python3 - <<'PY'
-          import json,pathlib
-          manifest=json.loads(pathlib.Path("manifest.webmanifest").read_text())
-          assert manifest["display"]=="standalone"
-          for icon in manifest["icons"]:
-              assert pathlib.Path(icon["src"]).is_file(), icon["src"]
-          html=pathlib.Path("index.html").read_text()
+          import json, pathlib, re, struct, subprocess, tempfile
+          root=pathlib.Path('.')
+          manifest=json.loads((root/'manifest.webmanifest').read_text())
+          assert manifest['display']=='standalone'
+          assert manifest['start_url']=='./'
+          html=(root/'index.html').read_text()
           assert 'manifest.webmanifest' in html
           assert 'sw.js' in html
-          print("Spartan static site checks passed")
+          scripts=re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>',html,re.S|re.I)
+          assert scripts, 'No inline scripts found'
+          for i,script in enumerate(scripts):
+              with tempfile.NamedTemporaryFile(mode='w',suffix='.js') as f:
+                  f.write(script);f.flush()
+                  subprocess.run(['node','--check',f.name],check=True)
+          for icon in manifest['icons']:
+              p=root/icon['src']
+              assert p.is_file(), f'Missing icon: {p}'
+              data=p.read_bytes()
+              assert data[:8]==b'\x89PNG\r\n\x1a\n', f'Invalid PNG: {p}'
+              width,height=struct.unpack('>II',data[16:24])
+              expected=int(icon['sizes'].split('x')[0])
+              assert (width,height)==(expected,expected), f'Wrong PNG dimensions: {p}'
+          sw=(root/'sw.js').read_text()
+          assert 'index.html' in sw and 'manifest.webmanifest' in sw
+          print(f'PASS: {len(scripts)} inline scripts, manifest, PNG icons, service worker')
           PY
