@@ -44,5 +44,11 @@ jobs:
               assert (width,height)==(expected,expected), f'Wrong PNG dimensions: {p}'
           sw=(root/'sw.js').read_text()
           assert 'index.html' in sw and 'manifest.webmanifest' in sw
-          print(f'PASS: {len(scripts)} inline scripts, manifest, PNG icons, service worker')
+          # Ensure the offline shell lists the files needed to reopen the app.
+          for required in ('index.html','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png'):
+              assert required in sw, f'Offline cache missing: {required}'
+          # Prevent accidentally publishing locally exported workout data.
+          prohibited=list(root.glob('**/*backup*.json')) + list(root.glob('**/*workout*.csv'))
+          assert not prohibited, f'Private export-like files must not be published: {prohibited}'
+          print(f'PASS: {len(scripts)} inline scripts, manifest, PNG icons, offline assets, privacy guard')
           PY
